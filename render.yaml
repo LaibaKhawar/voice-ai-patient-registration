@@ -1,0 +1,21 @@
+# Render Blueprint: one Docker web service. The database is external (Neon free
+# Postgres), so data never expires; set DATABASE_URL to its connection string.
+services:
+  - type: web
+    name: voice-ai-patient-registration
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /ready
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: VAPI_WEBHOOK_SECRET
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true

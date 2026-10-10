@@ -1,0 +1,16 @@
+# Render's free tier sleeps after ~15 minutes idle; a cold start could make the
+# first voice-agent tool call slow. Ping the readiness endpoint during the review
+# window. Set the repository variable APP_URL (e.g. https://xyz.onrender.com).
+name: Keep warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.APP_URL != '' }}
+    steps:
+      - run: curl -fsS --retry 3 --retry-delay 20 --max-time 90 "${{ vars.APP_URL }}/ready"
