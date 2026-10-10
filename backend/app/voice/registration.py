@@ -316,6 +316,18 @@ def review_registration(db: Session, session: CallSession, args: dict[str, Any])
             "missing_required": [v.FIELD_LABELS[f] for f in missing],
             "instruction": "Collect the missing required fields before reviewing.",
         }
+    # The caller must be offered the optional fields before the read-back.
+    # Skipped for updates, where the caller already chose what to change.
+    if session.mode == "create" and args.get("optional_fields_offered") is not True:
+        return {
+            "ready": False,
+            "instruction": (
+                "Before reviewing, ask in one short question whether they'd like to add insurance "
+                "information, an emergency contact, a preferred language, or an email. Save anything "
+                "they give with update_patient_info, then call review_registration with "
+                "optional_fields_offered=true."
+            ),
+        }
     session.state = "awaiting_confirmation"
     session.reviewed_hash = _draft_hash(session.draft, session.mode)
     return {

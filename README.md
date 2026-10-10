@@ -82,7 +82,8 @@ greeting (AI disclosure, asks for name)
        |- phone already on file -> ask DOB -> verify_existing_patient -> "we already have a record
        |                           for <First Last>, update instead?" -> use_existing_record
        '- "start over"        -> confirm -> start_over
-  -> offer optional fields in one question (insurance, emergency contact, language, email)
+  -> offer optional fields in one question (insurance, emergency contact, language, email);
+     enforced: review_registration refuses until optional_fields_offered=true
   -> review_registration -> read back in chunks, names spelled out
   -> caller confirms -> submit_registration -> "You're all set, <First Name>." -> goodbye -> endCall
                      '- caller corrects -> update -> review again
@@ -240,7 +241,7 @@ The tests run against real PostgreSQL migrated with Alembic, so the database con
   - A simulated DB failure: the caller is told nothing was saved, and a retry succeeds.
   - Dropped calls, the returning-caller flow (no identity leak before DOB matches), shared family phones, declining the update, and corrections after save.
 
-Latest results: **93 passed** locally (PostgreSQL 18) and in GitHub Actions CI (PostgreSQL 16). The dashboard passes `npm run lint` and `npm run build` cleanly.
+Latest results: **94 passed** locally (PostgreSQL 18) and in GitHub Actions CI (PostgreSQL 16). The dashboard passes `npm run lint` and `npm run build` cleanly.
 
 These were also verified against the live deployment:
 - `/ready` and the seed data;
@@ -248,7 +249,19 @@ These were also verified against the live deployment:
 - create → 422 with field reasons → partial update → phone filter → soft delete (then 404);
 - webhook secret enforcement and the dashboard cookie login.
 
-Live calls through the phone number reached the webhook. Each answer was validated and stored on the call session. An abandoned call left no patient record and stored its transcript.
+Live phone calls to the production number (2026-10-10) completed real registrations and exercised these flows:
+- A future DOB ("2029") was rejected and re-asked.
+- A phone number starting with 0 was rejected with the specific reason.
+- A 4-digit ZIP was re-asked.
+- A mid-call correction ("Actually, my address is 578 Main Street") replaced the earlier address.
+- After the read-back and "Yeah", the record was saved and the agent said "You're all set, Sarah."
+- A post-registration medical question was redirected to the clinic line and 911.
+- An earlier call where the caller declined to give an address ended with no patient record and a stored transcript.
+
+These calls also surfaced issues that are now fixed:
+- The optional-fields offer was skipped. It is now enforced server-side: `review_registration` requires `optional_fields_offered=true` for new registrations.
+- A last name was misheard by speech recognition. The agent now always asks callers to spell their last name.
+- A misheard city ("Miles Angeles") was accepted. The agent is now told to question implausible place names.
 
 ## Security and privacy
 
