@@ -6,16 +6,16 @@ Call a U.S. phone number and register as a new patient by talking to an AI intak
 
 | | |
 |---|---|
-| Phone number | `__PHONE_NUMBER__` |
-| API base URL | `__BASE_URL__` |
-| API docs (OpenAPI) | `__BASE_URL__/docs` |
-| Dashboard | `__BASE_URL__/dashboard/` |
+| Phone number | **+1 (948) 222-9061** |
+| API base URL | `https://voice-ai-patient-registration-9cd2.onrender.com` |
+| API docs (OpenAPI) | `https://voice-ai-patient-registration-9cd2.onrender.com/docs` |
+| Dashboard | `https://voice-ai-patient-registration-9cd2.onrender.com/dashboard/` |
 | Access key | Sent with the submission, not committed. Use it as `Authorization: Bearer <key>` or on the dashboard login. |
 
 Try it:
 
 1. Call the number and register (use made-up details). Try correcting a field, giving a future birth date, or saying "start over".
-2. `curl -H "Authorization: Bearer $KEY" "__BASE_URL__/patients?last_name=<your last name>"`
+2. `curl -H "Authorization: Bearer $KEY" "https://voice-ai-patient-registration-9cd2.onrender.com/patients?last_name=<your last name>"`
 3. Call again and give the same phone number. After you confirm your date of birth, the agent offers to update your existing record instead of creating a duplicate.
 
 ## Architecture
@@ -70,7 +70,7 @@ The LLM handles natural language: varied phrasing, out-of-order answers, small t
 | FastAPI + Pydantic v2 | Typed request validation and automatic OpenAPI docs. |
 | PostgreSQL + SQLAlchemy 2 + Alembic | Real constraints (CHECK, enum, partial indexes), JSONB for the call draft, row locks for concurrent tool calls, and migrations instead of ad-hoc DDL. |
 | Next.js static export + Tailwind | A real dashboard without a second server. The same origin means an HttpOnly session cookie, no CORS, and no API key in the browser. |
-| One Docker image on Railway | One deployable unit with managed Postgres. Migrations run on boot, and a `/ready` health check gates traffic. |
+| One Docker image on Render (free tier) | One deployable unit plus managed Postgres, with no card required. Migrations run on boot, and a `/ready` health check gates traffic. Railway was the first choice, but its free trial had expired. |
 
 ## Voice conversation flow
 
@@ -202,20 +202,23 @@ docker run -p 8000:8000 --env-file backend/.env -e DATABASE_URL=postgresql://hos
 | `SEED_DEMO_DATA` | no | `true` inserts 2 synthetic patients on boot (idempotent) |
 | `VAPI_API_KEY`, `PUBLIC_BASE_URL` | setup script only | Used by `scripts/setup_vapi.py`. Not needed at runtime. |
 
-## Deployment (Railway)
+## Deployment (Render, free tier)
 
-1. Create a Railway project, add the PostgreSQL plugin, and add a service from this repo. `railway.json` selects the Dockerfile and the `/ready` health check.
-2. Set the service variables: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `API_KEY`, `SECRET_KEY`, `VAPI_WEBHOOK_SECRET`, and `ENVIRONMENT=production`. Generate secrets with `openssl rand -hex 32`.
-3. Deploy. On boot the container runs `alembic upgrade head`, then the idempotent seed, then uvicorn.
-4. Configure the voice agent and phone number:
+1. In Render, choose **New → Blueprint** and select this repo. [`render.yaml`](render.yaml) creates a free PostgreSQL database and a free Docker web service. `DATABASE_URL` is wired automatically and `SECRET_KEY` is generated.
+2. Enter `API_KEY` and `VAPI_WEBHOOK_SECRET` when prompted. Generate them with `openssl rand -hex 32`.
+3. On every deploy the container runs `alembic upgrade head`, then the idempotent seed, then uvicorn. Render only routes traffic once `/ready` passes.
+4. Point the voice agent and phone number at the deployment:
 
    ```bash
    cd backend
-   VAPI_API_KEY=... PUBLIC_BASE_URL=https://<service>.up.railway.app VAPI_WEBHOOK_SECRET=<same as server> \
-     python -m scripts.setup_vapi --provision-number
+   VAPI_API_KEY=... PUBLIC_BASE_URL=https://<service>.onrender.com VAPI_WEBHOOK_SECRET=<same as server> \
+     python -m scripts.setup_vapi --provision-number --area-code 948
    ```
 
-   Re-running the script updates the assistant in place. It provisions a number only if none is attached.
+   Re-running the script updates the assistant in place (prompt, tools, webhook URL). It provisions a number only if none is attached. Free Vapi numbers are limited to the area codes Vapi currently has available.
+5. Set the repository variable `APP_URL` to the service URL. The [keep-warm workflow](.github/workflows/keep-warm.yml) then pings `/ready` every 10 minutes, so the free instance doesn't sleep and the first tool call of a phone call isn't slowed by a cold start.
+
+Pushes to `main` redeploy automatically. [CI](.github/workflows/ci.yml) runs the backend tests against PostgreSQL 16 and lints and builds the dashboard.
 
 ## Testing
 
@@ -237,7 +240,15 @@ The tests run against real PostgreSQL migrated with Alembic, so the database con
   - A simulated DB failure: the caller is told nothing was saved, and a retry succeeds.
   - Dropped calls, the returning-caller flow (no identity leak before DOB matches), shared family phones, declining the update, and corrections after save.
 
-`__TEST_RESULTS__`
+Latest results: **93 passed** locally (PostgreSQL 18) and in GitHub Actions CI (PostgreSQL 16). The dashboard passes `npm run lint` and `npm run build` cleanly.
+
+These were also verified against the live deployment:
+- `/ready` and the seed data;
+- 401 without credentials;
+- create → 422 with field reasons → partial update → phone filter → soft delete (then 404);
+- webhook secret enforcement and the dashboard cookie login.
+
+Live calls through the phone number reached the webhook. Each answer was validated and stored on the call session. An abandoned call left no patient record and stored its transcript.
 
 ## Security and privacy
 
@@ -253,6 +264,7 @@ The tests run against real PostgreSQL migrated with Alembic, so the database con
 
 ## Known limitations and trade-offs
 
+- **Free-tier hosting.** Render's free Postgres expires 30 days after creation (this one on 2026-11-09). Moving to a free Neon database only requires changing `DATABASE_URL`. The free web instance can sleep, which the keep-warm workflow mitigates. GitHub cron can be delayed, so the first request after a long idle period may take about 30–60s.
 - **Not HIPAA-compliant.** Vapi and OpenAI process the audio and text without a BAA in this setup, as the brief allows.
 - **Single shared admin key** instead of per-user accounts and roles. This is fine for a reviewer demo, but the next step for production is SSO with an audit log.
 - **Names allow internal spaces** ("De La Cruz") in addition to the letters, hyphens, and apostrophes the spec lists. This is a deliberate relaxation for real-world surnames.
