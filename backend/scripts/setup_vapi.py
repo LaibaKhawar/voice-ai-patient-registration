@@ -2,7 +2,7 @@
 
 Usage (from backend/):
     VAPI_API_KEY=... PUBLIC_BASE_URL=https://your-app.example.com VAPI_WEBHOOK_SECRET=... \
-        python -m scripts.setup_vapi [--provision-number] [--area-code 512] [--dry-run]
+        python -m scripts.setup_vapi [--provision-number] [--area-code 512 ...] [--dry-run]
 
 Idempotent: the assistant is matched by name and updated in place; a number is
 only provisioned if none is already attached to the assistant.
@@ -36,7 +36,8 @@ def _check(res: httpx.Response) -> dict | list:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--provision-number", action="store_true")
-    parser.add_argument("--area-code", default=None)
+    parser.add_argument("--area-code", action="append",
+                        help="Preferred area code(s); tried in order. Default tries a few common ones.")
     parser.add_argument("--dry-run", action="store_true", help="Print the assistant JSON and exit")
     args = parser.parse_args()
 
@@ -70,11 +71,19 @@ def main() -> None:
             print(f"Number attached: {n.get('number') or '(pending)'} status={n.get('status')} id={n['id']}")
 
         if args.provision_number and not attached:
-            body = {"provider": "vapi", "name": "Patient registration line", "assistantId": assistant_id}
-            if args.area_code:
-                body["numberDesiredAreaCode"] = args.area_code
-            number = _check(vapi.post("/phone-number", json=body))
-            print(f"Provisioned number: {number.get('number') or '(pending)'} status={number.get('status')} id={number['id']}")
+            # Vapi requires an area code; availability varies, so try several.
+            for area_code in args.area_code or ["512", "415", "646", "312", "206", "702", "305"]:
+                body = {"provider": "vapi", "name": "Patient registration line",
+                        "assistantId": assistant_id, "numberDesiredAreaCode": area_code}
+                res = vapi.post("/phone-number", json=body)
+                if res.status_code < 400:
+                    number = res.json()
+                    print(f"Provisioned number: {number.get('number') or '(pending)'} "
+                          f"status={number.get('status')} id={number['id']}")
+                    break
+                print(f"Area code {area_code} unavailable: {res.text[:200]}")
+            else:
+                sys.exit("Could not provision a number with any area code tried.")
             print("Free Vapi numbers can take a few minutes to become active.")
 
 

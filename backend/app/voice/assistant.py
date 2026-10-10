@@ -13,7 +13,7 @@ from app.voice.tools import vapi_tools
 def build_assistant(public_base_url: str, webhook_secret: str) -> dict[str, Any]:
     webhook_url = public_base_url.rstrip("/") + "/vapi/webhook"
     return {
-        "name": f"{CLINIC_NAME} Registration ({AGENT_NAME})",
+        "name": f"Patient Registration ({AGENT_NAME})",  # Vapi max 40 chars
         "firstMessage": FIRST_MESSAGE,
         "firstMessageMode": "assistant-speaks-first",
         "model": {
