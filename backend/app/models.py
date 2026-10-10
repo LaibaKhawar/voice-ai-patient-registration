@@ -9,6 +9,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    false,
     func,
     text,
 )
@@ -128,6 +130,9 @@ class CallSession(Base):
     matched_patient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     verified_patient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     verification_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Set when review_registration has bounced the agent back to offer the
+    # optional fields; the offer is enforced by the server, not by a flag the LLM sets.
+    optional_offered: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     patient_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("patients.patient_id")

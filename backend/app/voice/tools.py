@@ -72,10 +72,10 @@ FUNCTIONS: list[dict[str, Any]] = [
     _fn(
         "review_registration",
         "Get the complete current registration formatted for reading back to the caller. Call once all "
-        "required fields are saved and optional details have been offered. Must be called (and read back) "
+        "required fields are saved. It may first tell you to offer the optional details; do so, then call it again. "
+        "Must be called (and read back) "
         "before submit_registration.",
-        {"optional_fields_offered": {"type": "boolean", "description": "true once you have asked whether the caller wants to add insurance, emergency contact, preferred language or email (whatever they answered)."}},
-        ["optional_fields_offered"],
+        {},
     ),
     _fn(
         "submit_registration",

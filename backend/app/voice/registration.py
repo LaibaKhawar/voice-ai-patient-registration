@@ -316,16 +316,21 @@ def review_registration(db: Session, session: CallSession, args: dict[str, Any])
             "missing_required": [v.FIELD_LABELS[f] for f in missing],
             "instruction": "Collect the missing required fields before reviewing.",
         }
-    # The caller must be offered the optional fields before the read-back.
-    # Skipped for updates, where the caller already chose what to change.
-    if session.mode == "create" and args.get("optional_fields_offered") is not True:
+    # The caller must be offered the optional fields before the read-back. The
+    # first review request of a new registration is always bounced back with an
+    # explicit instruction (unless the caller already volunteered optional data);
+    # the server remembers the offer was prompted. This doesn't rely on the LLM
+    # truthfully reporting that it asked.
+    has_optional = any(session.draft.get(f) for f in v.OPTIONAL_FIELDS if f != "preferred_language")
+    if session.mode == "create" and not session.optional_offered and not has_optional:
+        session.optional_offered = True
         return {
             "ready": False,
             "instruction": (
-                "Before reviewing, ask in one short question whether they'd like to add insurance "
-                "information, an emergency contact, a preferred language, or an email. Save anything "
-                "they give with update_patient_info, then call review_registration with "
-                "optional_fields_offered=true."
+                "Not yet. First ask the caller, in one short question, whether they'd like to add "
+                "insurance information, an emergency contact, a preferred language, or an email. "
+                "Wait for their answer and save anything they give with update_patient_info. "
+                "Then call review_registration again."
             ),
         }
     session.state = "awaiting_confirmation"
@@ -411,9 +416,10 @@ def submit_registration(db: Session, session: CallSession, args: dict[str, Any])
         "success": True,
         "outcome": outcome,
         "first_name": patient.first_name,
+        "say_next": f"You're all set, {patient.first_name}.",
         "instruction": (
-            f"Tell the caller: \"You're all set, {patient.first_name}.\" Ask if there's anything else; "
-            "if not, say a warm goodbye and end the call."
+            "Saved. Your very next words must be exactly say_next, before anything else. Then ask if "
+            "there's anything else; if not, say a warm goodbye and end the call."
         ),
     }
 
@@ -429,6 +435,7 @@ def start_over(db: Session, session: CallSession, args: dict[str, Any]) -> dict[
     session.reviewed_hash = None
     session.matched_patient_id = None
     session.verified_patient_id = None
+    session.optional_offered = False
     return {"reset": True, "instruction": "All collected information was cleared. Start again from the caller's first and last name."}
 
 

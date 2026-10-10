@@ -83,7 +83,7 @@ greeting (AI disclosure, asks for name)
        |                           for <First Last>, update instead?" -> use_existing_record
        '- "start over"        -> confirm -> start_over
   -> offer optional fields in one question (insurance, emergency contact, language, email);
-     enforced: review_registration refuses until optional_fields_offered=true
+     enforced: the first review_registration is rejected until the offer has been prompted
   -> review_registration -> read back in chunks, names spelled out
   -> caller confirms -> submit_registration -> "You're all set, <First Name>." -> goodbye -> endCall
                      '- caller corrects -> update -> review again
@@ -241,7 +241,7 @@ The tests run against real PostgreSQL migrated with Alembic, so the database con
   - A simulated DB failure: the caller is told nothing was saved, and a retry succeeds.
   - Dropped calls, the returning-caller flow (no identity leak before DOB matches), shared family phones, declining the update, and corrections after save.
 
-Latest results: **94 passed** locally (PostgreSQL 18) and in GitHub Actions CI (PostgreSQL 16). The dashboard passes `npm run lint` and `npm run build` cleanly.
+Latest results: **96 passed** locally (PostgreSQL 18) and in GitHub Actions CI (PostgreSQL 16). The dashboard passes `npm run lint` and `npm run build` cleanly.
 
 These were also verified against the live deployment:
 - `/ready` and the seed data;
@@ -249,7 +249,7 @@ These were also verified against the live deployment:
 - create → 422 with field reasons → partial update → phone filter → soft delete (then 404);
 - webhook secret enforcement and the dashboard cookie login.
 
-Live phone calls to the production number (2026-10-10) completed real registrations and exercised these flows:
+Five live phone calls to the production number (2026-10-10) completed four real registrations and exercised these flows:
 - A future DOB ("2029") was rejected and re-asked.
 - A phone number starting with 0 was rejected with the specific reason.
 - A 4-digit ZIP was re-asked.
@@ -259,7 +259,10 @@ Live phone calls to the production number (2026-10-10) completed real registrati
 - An earlier call where the caller declined to give an address ended with no patient record and a stored transcript.
 
 These calls also surfaced issues that are now fixed:
-- The optional-fields offer was skipped. It is now enforced server-side: `review_registration` requires `optional_fields_offered=true` for new registrations.
+- The optional-fields offer was skipped, including once when the model claimed via a flag that it had asked. It is now enforced by the server: the first `review_registration` of a new registration is always rejected with "ask about the optional fields now", and the server records that it did so. No flag set by the LLM is trusted.
+- In one call the model changed a spoken birth year (2026 → 2020). It is now told never to alter values; the read-back plus the caller's confirmation is the backstop.
+- The agent once skipped "You're all set". The save result now includes the exact sentence to say next (`say_next`).
+- The agent asked for both name spellings in one turn, and the answers ran together. It now asks for one spelling at a time.
 - A last name was misheard by speech recognition. The agent now always asks callers to spell their last name.
 - A misheard city ("Miles Angeles") was accepted. The agent is now told to question implausible place names.
 

@@ -14,6 +14,13 @@ SECRET = {"X-Vapi-Secret": "test-vapi-secret"}
 class Call:
     """Simulates one phone call hitting the webhook."""
 
+    def review(self):
+        """review_registration as the agent does it: the first call bounces for the optional-field offer."""
+        r = self.tool("review_registration")
+        if r.get("ready") is False and "insurance" in r.get("instruction", ""):
+            r = self.tool("review_registration")
+        return r
+
     def __init__(self, client, caller="+15125550000"):
         self.client = client
         self.id = f"call-{uuid.uuid4()}"
@@ -84,7 +91,7 @@ def test_happy_path_registration(call, client):
     r = call.tool("update_patient_info", {"phone_number": "(512) 555-0142", "address_line_1": "200 Main Street"})
     assert r["missing_required"] == []
 
-    review = call.tool("review_registration", {"optional_fields_offered": True})
+    review = call.review()
     assert review["ready"] is True
     assert "March 5, 1990" in review["read_back"]["date of birth"]
     assert review["read_back"]["phone number"] == "512-555-0142"
@@ -120,7 +127,7 @@ def test_invalid_values_are_rejected_with_specific_reason(call, field, value, fr
 def test_correction_replaces_value(call, client):
     call.tool("update_patient_info", {**FULL, "last_name": "Davies"})
     call.tool("update_patient_info", {"last_name": "Davis"})
-    review = call.tool("review_registration", {"optional_fields_offered": True})
+    review = call.review()
     assert review["read_back"]["last name"].startswith("Davis (spelled D-A-V-I-S)")
     call.tool("submit_registration", {"caller_confirmed": True})
     assert client.get("/patients").json()["data"][0]["last_name"] == "Davis"
@@ -129,7 +136,7 @@ def test_correction_replaces_value(call, client):
 def test_cannot_submit_without_review_or_confirmation(call):
     call.tool("update_patient_info", FULL)
     assert "_error" in call.tool("submit_registration", {"caller_confirmed": True})  # never reviewed
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     assert "_error" in call.tool("submit_registration", {"caller_confirmed": False})
     assert "_error" in call.tool("submit_registration", {})
     assert patient_count() == 0
@@ -137,22 +144,22 @@ def test_cannot_submit_without_review_or_confirmation(call):
 
 def test_change_after_review_requires_new_review(call):
     call.tool("update_patient_info", FULL)
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     call.tool("update_patient_info", {"city": "Round Rock"})
     assert "_error" in call.tool("submit_registration", {"caller_confirmed": True})
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     assert call.tool("submit_registration", {"caller_confirmed": True})["success"] is True
 
 
 def test_review_reports_missing_fields(call):
     call.tool("update_patient_info", {"first_name": "Maria"})
-    r = call.tool("review_registration", {"optional_fields_offered": True})
+    r = call.review()
     assert r["ready"] is False and "last name" in r["missing_required"]
 
 
 def test_repeated_submit_is_idempotent(call):
     call.tool("update_patient_info", FULL)
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     a = call.tool("submit_registration", {"caller_confirmed": True})
     b = call.tool("submit_registration", {"caller_confirmed": True})
     assert a["success"] and b["success"] and b.get("already_saved")
@@ -163,7 +170,7 @@ def test_start_over_clears_draft(call):
     call.tool("update_patient_info", {"first_name": "Maria", "city": "Austin"})
     r = call.tool("start_over")
     assert r["reset"] is True
-    r = call.tool("review_registration", {"optional_fields_offered": True})
+    r = call.review()
     assert "first name" in r["missing_required"] and "city" in r["missing_required"]
 
 
@@ -171,7 +178,7 @@ def test_optional_fields_and_clearing(call, client):
     call.tool("update_patient_info", {**FULL, "email": "maria@example.com", "insurance_provider": "Aetna"})
     r = call.tool("update_patient_info", {"clear_fields": ["email"]})
     assert r["cleared"] == ["email"]
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     call.tool("submit_registration", {"caller_confirmed": True})
     p = client.get("/patients").json()["data"][0]
     assert p["email"] is None and p["insurance_provider"] == "Aetna"
@@ -193,7 +200,7 @@ def test_database_failure_is_reported_not_hidden(call, monkeypatch):
         raise RuntimeError("database is down")
 
     call.tool("update_patient_info", FULL)
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     monkeypatch.setattr(svc, "create_patient", boom)
     r = call.tool("submit_registration", {"caller_confirmed": True})
     assert r["success"] is False and "NOT be saved" in r["instruction"]
@@ -215,7 +222,7 @@ def test_dropped_call_marks_session_abandoned_and_saves_nothing(call, client):
 def test_returning_caller_requires_dob_before_revealing_identity(anon_client, client):
     first = Call(anon_client)
     first.tool("update_patient_info", FULL)
-    first.tool("review_registration", {"optional_fields_offered": True})
+    first.review()
     first.tool("submit_registration", {"caller_confirmed": True})
 
     second = Call(anon_client)
@@ -232,7 +239,7 @@ def test_returning_caller_requires_dob_before_revealing_identity(anon_client, cl
     r = second.tool("use_existing_record", {"update_existing": True})
     assert r["mode"] == "update"
     second.tool("update_patient_info", {"address_line_1": "9 Oak Lane", "city": "Dallas", "zip_code": "75201"})
-    review = second.tool("review_registration", {"optional_fields_offered": True})
+    review = second.review()
     assert review["mode"] == "update" and review["read_back"]["first name"].startswith("Maria")
     done = second.tool("submit_registration", {"caller_confirmed": True})
     assert done["success"] and done["outcome"] == "updated"
@@ -244,7 +251,7 @@ def test_returning_caller_requires_dob_before_revealing_identity(anon_client, cl
 def test_returning_caller_with_dob_already_given_is_verified_immediately(anon_client):
     first = Call(anon_client)
     first.tool("update_patient_info", FULL)
-    first.tool("review_registration", {"optional_fields_offered": True})
+    first.review()
     first.tool("submit_registration", {"caller_confirmed": True})
 
     second = Call(anon_client)
@@ -256,13 +263,13 @@ def test_returning_caller_with_dob_already_given_is_verified_immediately(anon_cl
 def test_shared_phone_with_different_dob_registers_new_patient(anon_client):
     first = Call(anon_client)
     first.tool("update_patient_info", FULL)
-    first.tool("review_registration", {"optional_fields_offered": True})
+    first.review()
     first.tool("submit_registration", {"caller_confirmed": True})
 
     second = Call(anon_client)
     r = second.tool("update_patient_info", {**FULL, "first_name": "Lucia", "date_of_birth": "07/07/2012"})
     assert "existing_record" not in r
-    second.tool("review_registration", {"optional_fields_offered": True})
+    second.review()
     second.tool("submit_registration", {"caller_confirmed": True})
     assert patient_count() == 2
 
@@ -270,7 +277,7 @@ def test_shared_phone_with_different_dob_registers_new_patient(anon_client):
 def test_declining_update_continues_as_new_registration(anon_client):
     first = Call(anon_client)
     first.tool("update_patient_info", FULL)
-    first.tool("review_registration", {"optional_fields_offered": True})
+    first.review()
     first.tool("submit_registration", {"caller_confirmed": True})
 
     second = Call(anon_client)
@@ -278,17 +285,17 @@ def test_declining_update_continues_as_new_registration(anon_client):
     second.tool("verify_existing_patient", {"date_of_birth": "03/05/1990"})
     assert second.tool("use_existing_record", {"update_existing": False})["mode"] == "create"
     second.tool("update_patient_info", FULL)
-    second.tool("review_registration", {"optional_fields_offered": True})
+    second.review()
     assert second.tool("submit_registration", {"caller_confirmed": True})["outcome"] == "registered"
     assert patient_count() == 2
 
 
 def test_correction_after_save_updates_same_record(call, client):
     call.tool("update_patient_info", FULL)
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     call.tool("submit_registration", {"caller_confirmed": True})
     call.tool("update_patient_info", {"zip_code": "78702"})
-    call.tool("review_registration", {"optional_fields_offered": True})
+    call.review()
     r = call.tool("submit_registration", {"caller_confirmed": True})
     assert r["outcome"] == "updated" and patient_count() == 1
     assert client.get("/patients").json()["data"][0]["zip_code"] == "78702"
@@ -305,4 +312,16 @@ def test_review_requires_optional_fields_offer(call):
     r = call.tool("review_registration")
     assert r["ready"] is False and "insurance" in r["instruction"]
     assert "_error" in call.tool("submit_registration", {"caller_confirmed": True})
-    assert call.tool("review_registration", {"optional_fields_offered": True})["ready"] is True
+    assert call.tool("review_registration")["ready"] is True  # offer was prompted; now proceeds
+
+
+def test_optional_offer_not_forced_when_caller_volunteered_optional_data(call):
+    call.tool("update_patient_info", {**FULL, "insurance_provider": "Aetna"})
+    assert call.tool("review_registration")["ready"] is True
+
+
+def test_success_result_scripts_the_confirmation_line(call):
+    call.tool("update_patient_info", FULL)
+    call.review()
+    r = call.tool("submit_registration", {"caller_confirmed": True})
+    assert r["say_next"] == "You're all set, Maria."
