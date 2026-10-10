@@ -325,3 +325,15 @@ def test_success_result_scripts_the_confirmation_line(call):
     call.review()
     r = call.tool("submit_registration", {"caller_confirmed": True})
     assert r["say_next"] == "You're all set, Maria."
+
+
+def test_apartment_number_does_not_skip_optional_offer(call):
+    call.tool("update_patient_info", {**FULL, "address_line_2": "Apt 4B"})
+    r = call.tool("review_registration")
+    assert r["ready"] is False and "insurance" in r["instruction"]
+
+
+def test_saving_a_name_prompts_for_spelling(call):
+    r = call.tool("update_patient_info", {"last_name": "Khawar"})
+    assert "spell" in r["instruction"] and "last name" in r["instruction"]
+    assert "instruction" not in call.tool("update_patient_info", {"city": "Austin"})

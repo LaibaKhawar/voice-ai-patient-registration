@@ -39,6 +39,11 @@ from app.services import patients as svc
 log = logging.getLogger("voice.registration")
 
 MAX_VERIFICATION_ATTEMPTS = 2
+# The optional details the agent must offer before the read-back.
+OFFERED_OPTIONAL_FIELDS = (
+    "email", "insurance_provider", "insurance_member_id",
+    "emergency_contact_name", "emergency_contact_phone",
+)
 
 
 class ToolError(Exception):
@@ -222,11 +227,22 @@ def update_patient_info(db: Session, session: CallSession, args: dict[str, Any])
     }
     if cleared:
         result["cleared"] = cleared
+    instructions = []
     if errors:
-        result["instruction"] = (
+        instructions.append(
             "Some values were rejected. Briefly tell the caller what was wrong with each "
             "and ask again for just those fields."
         )
+    # Speech recognition garbles names; a just-in-time reminder is far more
+    # reliable than a rule buried in the system prompt.
+    spell = [v.FIELD_LABELS[f] for f in ("first_name", "last_name") if f in saved]
+    if spell:
+        instructions.append(
+            f"Unless the caller already spelled it letter by letter, ask them to spell their "
+            f"{' and then their '.join(spell)} now, one name per question, and save the spelled version."
+        )
+    if instructions:
+        result["instruction"] = " ".join(instructions)
     if "phone_number" in saved or "date_of_birth" in saved:
         notice = _check_phone_match(db, session)
         if notice:
@@ -321,7 +337,8 @@ def review_registration(db: Session, session: CallSession, args: dict[str, Any])
     # explicit instruction (unless the caller already volunteered optional data);
     # the server remembers the offer was prompted. This doesn't rely on the LLM
     # truthfully reporting that it asked.
-    has_optional = any(session.draft.get(f) for f in v.OPTIONAL_FIELDS if f != "preferred_language")
+    # Only the fields the offer is about count; an apartment number does not.
+    has_optional = any(session.draft.get(f) for f in OFFERED_OPTIONAL_FIELDS)
     if session.mode == "create" and not session.optional_offered and not has_optional:
         session.optional_offered = True
         return {

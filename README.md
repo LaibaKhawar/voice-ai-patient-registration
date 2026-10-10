@@ -241,7 +241,7 @@ The tests run against real PostgreSQL migrated with Alembic, so the database con
   - A simulated DB failure: the caller is told nothing was saved, and a retry succeeds.
   - Dropped calls, the returning-caller flow (no identity leak before DOB matches), shared family phones, declining the update, and corrections after save.
 
-Latest results: **96 passed** locally (PostgreSQL 18) and in GitHub Actions CI (PostgreSQL 16). The dashboard passes `npm run lint` and `npm run build` cleanly.
+Latest results: **98 passed** locally (PostgreSQL 18) and in GitHub Actions CI (PostgreSQL 16). The dashboard passes `npm run lint` and `npm run build` cleanly.
 
 These were also verified against the live deployment:
 - `/ready` and the seed data;
@@ -249,7 +249,7 @@ These were also verified against the live deployment:
 - create → 422 with field reasons → partial update → phone filter → soft delete (then 404);
 - webhook secret enforcement and the dashboard cookie login.
 
-Five live phone calls to the production number (2026-10-10) completed four real registrations and exercised these flows:
+Six live phone calls to the production number (2026-10-10) completed five real registrations and exercised these flows:
 - A future DOB ("2029") was rejected and re-asked.
 - A phone number starting with 0 was rejected with the specific reason.
 - A 4-digit ZIP was re-asked.
@@ -263,6 +263,8 @@ These calls also surfaced issues that are now fixed:
 - In one call the model changed a spoken birth year (2026 → 2020). It is now told never to alter values; the read-back plus the caller's confirmation is the backstop.
 - The agent once skipped "You're all set". The save result now includes the exact sentence to say next (`say_next`).
 - The agent asked for both name spellings in one turn, and the answers ran together. It now asks for one spelling at a time.
+- The prompt rule "always ask the caller to spell their last name" was not reliably followed. When a name is saved, `update_patient_info` now returns a reminder to ask for its spelling at that moment.
+- An apartment number was wrongly counted as "caller already gave optional details", which skipped the offer. Only insurance, emergency contact and email now count.
 - A last name was misheard by speech recognition. The agent now always asks callers to spell their last name.
 - A misheard city ("Miles Angeles") was accepted. The agent is now told to question implausible place names.
 
