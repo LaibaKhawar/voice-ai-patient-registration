@@ -31,6 +31,8 @@ def build_assistant(public_base_url: str, webhook_secret: str) -> dict[str, Any]
         "server": {"url": webhook_url, "timeoutSeconds": 20, "headers": {"X-Vapi-Secret": webhook_secret}},
         "serverMessages": ["tool-calls", "status-update", "end-of-call-report"],
         "maxDurationSeconds": 900,
+        # Post-call summary stored on the call log (deprecated in favor of structured outputs, still supported).
+        "analysisPlan": {"summaryPlan": {"enabled": True}},
         "backgroundSpeechDenoisingPlan": {"smartDenoisingPlan": {"enabled": True}},
         # Barge-in: the caller can interrupt after ~2 words of speech.
         "stopSpeakingPlan": {"numWords": 2, "voiceSeconds": 0.2, "backoffSeconds": 1},

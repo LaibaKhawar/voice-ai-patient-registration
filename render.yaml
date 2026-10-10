@@ -1,10 +1,19 @@
-# Render Blueprint: one Docker web service. The database is external (Neon free
-# Postgres), so data never expires; set DATABASE_URL to its connection string.
+# Render Blueprint: Docker web service + free PostgreSQL, both on the free plan.
+# Note: Render's free Postgres expires 30 days after creation. For a database
+# that never expires, point DATABASE_URL at a free Neon database instead.
+databases:
+  - name: patient-registration-db
+    plan: free
+    region: oregon
+    databaseName: patient_registration
+    user: patient_app
+
 services:
   - type: web
     name: voice-ai-patient-registration
     runtime: docker
     plan: free
+    region: oregon
     dockerfilePath: ./Dockerfile
     healthCheckPath: /ready
     autoDeploy: true
@@ -12,10 +21,12 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: patient-registration-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
       - key: API_KEY
         sync: false
       - key: VAPI_WEBHOOK_SECRET
         sync: false
-      - key: SECRET_KEY
-        generateValue: true
